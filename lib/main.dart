@@ -1,61 +1,101 @@
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.white,
+      statusBarIconBrightness: Brightness.dark,
+      statusBarBrightness: Brightness.light,
+    ),
+  );
+
   runApp(const MyApp());
-
-  // Apply immersive mode after app starts
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 }
-
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // Set fullscreen after build
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    });
-
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: WebViewExample(),
+      home: WebViewFullScreen(),
     );
   }
 }
 
-class WebViewExample extends StatefulWidget {
-  const WebViewExample({super.key});
-
+class MyInAppBrowser extends InAppBrowser {
   @override
-  State<WebViewExample> createState() => _WebViewExampleState();
+  Future onExit() async {
+    debugPrint("InAppBrowser closed");
+  }
 }
 
-class _WebViewExampleState extends State<WebViewExample> {
-  late final WebViewController _controller;
+class WebViewFullScreen extends StatefulWidget {
+  const WebViewFullScreen({super.key});
 
   @override
-  void initState() {
-    super.initState();
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..loadRequest(Uri.parse('https://www.tapcargo.com/')); // <-- change to your site
-  }
+  State<WebViewFullScreen> createState() => _WebViewFullScreenState();
+}
 
-  Future<void> _refreshWebView() async {
-    _controller.reload();
+class _WebViewFullScreenState extends State<WebViewFullScreen> {
+  InAppWebViewController? _controller;
+  final MyInAppBrowser _browser = MyInAppBrowser();
+
+  void _injectCSS() {
+    _controller?.evaluateJavascript(
+      source: '''
+        const style = document.createElement('style');
+        style.innerHTML = '.top-gradient { background: transparent !important; }';
+        document.head.appendChild(style);
+      ''',
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: RefreshIndicator(
-        onRefresh: _refreshWebView,
-        child: WebViewWidget(controller: _controller),
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        top: true,
+        bottom: false,
+        child: InAppWebView(
+          initialUrlRequest: URLRequest(
+            url: WebUri('https://www.tapcargo.com/'),
+          ),
+          initialSettings: InAppWebViewSettings(
+            javaScriptEnabled: true,
+            allowsBackForwardNavigationGestures: true,
+            supportZoom: false,
+          ),
+          onWebViewCreated: (controller) {
+            _controller = controller;
+          },
+          onLoadStop: (controller, url) {
+            _injectCSS();
+          },
+          shouldOverrideUrlLoading: (controller, navAction) async {
+            final uri = navAction.request.url;
+
+            if (uri != null &&
+                uri.host.isNotEmpty &&
+                !uri.host.contains('tapcargo.com')) {
+              await _browser.openUrlRequest(urlRequest: URLRequest(url: uri));
+              return NavigationActionPolicy.CANCEL;
+            }
+
+            return NavigationActionPolicy.ALLOW;
+          },
+        ),
       ),
     );
   }
